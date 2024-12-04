@@ -19,6 +19,7 @@ jobs:
       GOLANG_VERSION: 1.22.5
       DCGM_VERSION: 3.3.9
       DCGM_EXPORTER_VERSION: 3.6.1
+      SCW_INFRA_REGISTRY_URL: rg.fr-par.scw.cloud/flexai-infra
 
     steps:
       - name: Checkout repository
@@ -29,7 +30,7 @@ jobs:
 
       - name: Login to Docker Hub
         run: |
-          docker login ${{ secrets.SCW_INFRA_REGISTRY_URL }} -p ${{ secrets.SCW_REGISTRY_INFRA_RW_SECRET }}
+          docker login ${{ env.SCW_INFRA_REGISTRY_URL }} -p ${{ secrets.SCW_REGISTRY_INFRA_RW_SECRET }}
 
       - name: Build and Push Docker Images
         uses: docker/build-push-action@v6
@@ -43,5 +44,5 @@ jobs:
             VERSION=${{ env.DCGM_EXPORTER_VERSION }}
           push: true
           tags: |
-            ${{ secrets.SCW_INFRA_REGISTRY_URL }}/dcgm-exporter:${{ github.sha }}
-            ${{ secrets.SCW_INFRA_REGISTRY_URL }}/dcgm-exporter:latest
+            ${{ env.SCW_INFRA_REGISTRY_URL }}/dcgm-exporter:${{ github.sha }}
+            ${{ env.SCW_INFRA_REGISTRY_URL }}/dcgm-exporter:latest
