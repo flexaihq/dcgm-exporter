@@ -40,7 +40,7 @@ jobs:
       - name: Build and Push Docker Images
         uses: docker/build-push-action@v6
         with:
-          context: docker/
+          context: .
           file: docker/Dockerfile.ubuntu22.04
           platforms: linux/amd64
           build-args: |
