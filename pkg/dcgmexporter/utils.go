@@ -20,9 +20,12 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 )
+
+var invalidLabelCharRE = regexp.MustCompile(`[^a-zA-Z0-9_]`)
 
 func WaitWithTimeout(wg *sync.WaitGroup, timeout time.Duration) error {
 	c := make(chan struct{})
@@ -62,4 +65,8 @@ func deepCopy[T any](src T) (dst T, err error) {
 	}
 
 	return dst, nil
+}
+
+func SanitizeLabelName(s string) string {
+	return invalidLabelCharRE.ReplaceAllString(s, "_")
 }

@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -179,7 +180,11 @@ var _ = Describe("dcgm-exporter-e2e-suite", func() {
 			helmClient      *framework.HelmClient
 			helmReleaseName string
 			dcgmExpPod      *corev1.Pod
-			customLabels    = map[string]string{"custom-key": "custom-value", "another-key": "another-value"}
+			customLabels    = map[string]string{
+				"valid_key":       "value-valid",
+				"key-with-dashes": "value-dashes",
+				"key.with.dots":   "value-dots",
+			}
 			labelMap        = map[string]string{dcgmExporterPodNameLabel: dcgmExporterPodNameLabelValue}
 			metricsResponse []byte
 		)
@@ -258,10 +263,14 @@ var _ = Describe("dcgm-exporter-e2e-suite", func() {
 				for _, metric := range metricFamily.GetMetric() {
 					for _, label := range metric.Label {
 						labelName := ptr.Deref(label.Name, "")
-						if slices.Contains([]string{"custom-key", "another-key"}, labelName) {
-							Expect(ptr.Deref(label.Value, "")).Should(Equal(customLabels[labelName]),
-								"Expected metric to include label %q with value %q, but got %q",
-								labelName, customLabels[labelName], ptr.Deref(label.Value, ""),
+						if slices.Contains(
+							[]string{"valid_key", "key_with_dashes", "key_with_dots"}, labelName,
+						) {
+							originalKey := strings.ReplaceAll(strings.ReplaceAll(labelName, "_", "."), "_", "-")
+							Expect(ptr.Deref(label.Value, "")).Should(
+								Equal(customLabels[originalKey]),
+								"Expected metric to include sanitized label %q with value %q, but got %q",
+								labelName, customLabels[originalKey], ptr.Deref(label.Value, ""),
 							)
 						}
 					}

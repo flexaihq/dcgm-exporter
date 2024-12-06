@@ -345,8 +345,8 @@ func TestProcessPodMapper_WithLabels(t *testing.T) {
 		name   string
 		labels map[string]string
 	}{
-		{"gpu-pod-0", map[string]string{"label-key": "label-value"}},
-		{"gpu-pod-1", map[string]string{"another-key": "another-value"}},
+		{"gpu-pod-0", map[string]string{"valid_label_key": "label-value"}},
+		{"gpu-pod-1", map[string]string{"invalid.label/key": "another-value"}},
 	}
 
 	objects := make([]runtime.Object, len(pods))
@@ -402,7 +402,12 @@ func TestProcessPodMapper_WithLabels(t *testing.T) {
 	for i, metric := range metrics[counter] {
 		pod := pods[i]
 		for key, value := range pod.labels {
-			require.Equal(t, value, metric.Labels[key])
+			sanitizedKey := SanitizeLabelName(key)
+
+			require.Contains(t, metric.Labels, sanitizedKey,
+				"Expected sanitized key '%s' to exist", sanitizedKey)
+			require.Equal(t, value, metric.Labels[sanitizedKey],
+				"Expected sanitized key '%s' to map to value '%s'", sanitizedKey, value)
 		}
 	}
 }
