@@ -249,5 +249,12 @@ func (p *PodMapper) getPodLabels(namespace, podName string) (map[string]string, 
 		return nil, err
 	}
 
-	return pod.Labels, nil
+	// Sanitize label names
+	sanitizedLabels := make((map[string]string), len(pod.Labels))
+	for k, v := range pod.Labels {
+		sanitizedKey := SanitizeLabelName(k)
+		sanitizedLabels[sanitizedKey] = v
+	}
+
+	return sanitizedLabels, nil
 }
