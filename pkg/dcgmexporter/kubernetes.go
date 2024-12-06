@@ -246,7 +246,7 @@ func (p *PodMapper) getPodLabels(namespace, podName string) (map[string]string, 
 
 	pod, err := p.Client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch labels: %w", err)
+		return nil, err
 	}
 
 	return pod.Labels, nil
