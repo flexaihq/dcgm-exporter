@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -69,10 +70,12 @@ var _ = Describe("dcgm-exporter-e2e-suite", func() {
 			labels = map[string]string{
 				"e2eRunID": runID.String(),
 			}
+			labelMap = map[string]string{dcgmExporterPodNameLabel: dcgmExporterPodNameLabelValue}
 
 			helmReleaseName string
 			dcgmExpPod      *corev1.Pod
-			workloadPod     *corev1.Pod
+
+			metricsResponse []byte
 		)
 
 		BeforeAll(func(ctx context.Context) {
@@ -111,152 +114,29 @@ var _ = Describe("dcgm-exporter-e2e-suite", func() {
 		})
 
 		It("should install dcgm-exporter helm chart", func(ctx context.Context) {
-			_, _ = fmt.Fprintf(GinkgoWriter, "Helm chart installation: %q chart started.\n",
-				testContext.chart)
-
-			values := []string{
-				fmt.Sprintf("serviceMonitor.enabled=%v", false),
-			}
-
-			if testContext.arguments != "" {
-				values = append(values, fmt.Sprintf("arguments=%s", testContext.arguments))
-			}
-
-			if testContext.imageRepository != "" {
-				values = append(values, fmt.Sprintf("image.repository=%s", testContext.imageRepository))
-			}
-			if testContext.imageTag != "" {
-				values = append(values, fmt.Sprintf("image.tag=%s", testContext.imageTag))
-			}
-
-			var err error
-
-			helmReleaseName, err = helmClient.Install(ctx, values, framework.HelmChartOptions{
-				CleanupOnFail: true,
-				GenerateName:  true,
-				Timeout:       5 * time.Minute,
-				Wait:          true,
-				DryRun:        false,
+			helmReleaseName = shouldInstallHelmChart(ctx, helmClient, []string{
+				"serviceMonitor.enabled=false",
 			})
-			Expect(err).ShouldNot(HaveOccurred(), "Helm chart installation: %q chart failed with error err: %v", testContext.chart, err)
-
-			_, _ = fmt.Fprintf(GinkgoWriter, "Helm chart installation: %q completed.\n",
-				testContext.chart)
-			_, _ = fmt.Fprintf(GinkgoWriter, "Helm chart installation: new %q release name.\n",
-				helmReleaseName)
 		})
 
-		labelMap := map[string]string{dcgmExporterPodNameLabel: dcgmExporterPodNameLabelValue}
-
 		It("should create dcgm-exporter pod", func(ctx context.Context) {
-			_, _ = fmt.Fprintln(GinkgoWriter, "Pod creation verification: started")
-
-			Eventually(func(ctx context.Context) bool {
-				pods, err := kubeClient.GetPodsByLabel(ctx, testContext.namespace, labelMap)
-				if err != nil {
-					Fail(fmt.Sprintf("Pod creation: Failed with error: %v", err))
-					return false
-				}
-
-				if len(pods) == 1 {
-					dcgmExpPod = &pods[0]
-					return true
-				}
-
-				return false
-			}).WithPolling(time.Second).Within(15 * time.Minute).WithContext(ctx).Should(BeTrue())
-
-			_, _ = fmt.Fprintln(GinkgoWriter, "Pod creation verification: completed")
+			dcgmExpPod = shouldCreateDCGMPod(ctx, kubeClient, testContext.namespace, labelMap)
 		})
 
 		It("should ensure that the dcgm-exporter pod is ready", func(ctx context.Context) {
-			_, _ = fmt.Fprintln(GinkgoWriter, "Checking pod status: started")
-			Eventually(func(ctx context.Context) bool {
-				isReady, err := kubeClient.CheckPodStatus(ctx,
-					testContext.namespace,
-					dcgmExpPod.Name,
-					func(namespace, podName string, status corev1.PodStatus) (bool, error) {
-						for _, c := range status.Conditions {
-							if c.Type != corev1.PodReady {
-								continue
-							}
-							if c.Status == corev1.ConditionTrue {
-								return true, nil
-							}
-						}
-
-						for _, c := range status.ContainerStatuses {
-							if c.State.Waiting != nil && c.State.Waiting.Reason == "CrashLoopBackOff" {
-								return false, fmt.Errorf("pod %s in namespace %s is in CrashLoopBackOff", podName, namespace)
-							}
-						}
-
-						return false, nil
-					})
-				if err != nil {
-					Fail(fmt.Sprintf("Checking pod status: Failed with error: %v", err))
-				}
-
-				return isReady
-			}).WithPolling(time.Second).Within(15 * time.Minute).WithContext(ctx).Should(BeTrue())
-			_, _ = fmt.Fprintln(GinkgoWriter, "Checking pod status: completed")
+			shouldEnsurePodReadiness(ctx, kubeClient, dcgmExpPod)
 		})
 
 		It("should create a workload pod", func(ctx context.Context) {
-			_, _ = fmt.Fprintln(GinkgoWriter, "Workload pod creation: started")
-
-			var err error
-
-			workloadPod, err = kubeClient.CreatePod(ctx,
-				testContext.namespace,
-				labels,
-				workloadPodName,
-				workloadContainerName,
-				workloadImage,
-			)
-
-			Expect(err).ShouldNot(HaveOccurred(),
-				"Workload pod creation: Failed create workload pod with err: %v", err)
-			Eventually(func(ctx context.Context) bool {
-				isReady, err := kubeClient.CheckPodStatus(ctx,
-					testContext.namespace,
-					workloadPod.Name, func(namespace, podName string, status corev1.PodStatus) (bool, error) {
-						return status.Phase == corev1.PodSucceeded, nil
-					})
-				if err != nil {
-					Fail(fmt.Sprintf("Workload pod creation: Checking pod status: Failed with error: %v", err))
-				}
-
-				return isReady
-			}).WithPolling(time.Second).Within(15 * time.Minute).WithContext(ctx).Should(BeTrue())
-
-			_, _ = fmt.Fprintln(GinkgoWriter, "Workload pod creation: completed")
+			shouldCreateWorkloadPod(ctx, kubeClient, labels)
 		})
 
 		It("should wait for 30 seconds, to read metrics", func() {
 			time.Sleep(30 * time.Second)
 		})
 
-		var metricsResponse []byte
-
 		It("should read metrics", func(ctx context.Context) {
-			_, _ = fmt.Fprintln(GinkgoWriter, "Read metrics: started")
-
-			Eventually(func(ctx context.Context) bool {
-				var err error
-
-				metricsResponse, err = kubeClient.DoHttpRequest(ctx,
-					testContext.namespace,
-					dcgmExpPod.Name,
-					dcgmExporterPort,
-					"metrics")
-				if err != nil {
-					Fail(fmt.Sprintf("Read metrics: Failed with error: %v", err))
-				}
-
-				return len(metricsResponse) > 0
-			}).WithPolling(time.Second).Within(time.Minute).WithContext(ctx).Should(BeTrue())
-			_, _ = fmt.Fprintln(GinkgoWriter, "Read metrics: completed")
+			metricsResponse = shouldReadMetrics(ctx, kubeClient, dcgmExpPod, dcgmExporterPort)
 		})
 
 		It("should verify metrics", func(ctx context.Context) {
@@ -291,6 +171,113 @@ var _ = Describe("dcgm-exporter-e2e-suite", func() {
 						ptr.Deref(metricFamily.Name, ""), expectedLabels, metric.Label)
 				}
 			}
+		})
+	})
+
+	When("DCGM exporter is deployed on kubernetes with pod labels collection enabled", Ordered, func() {
+		var (
+			kubeClient      *framework.KubeClient
+			helmClient      *framework.HelmClient
+			helmReleaseName string
+			dcgmExpPod      *corev1.Pod
+			customLabels    = map[string]string{
+				"valid_key":       "value-valid",
+				"key-with-dashes": "value-dashes",
+				"key.with.dots":   "value-dots",
+			}
+			labelMap        = map[string]string{dcgmExporterPodNameLabel: dcgmExporterPodNameLabelValue}
+			metricsResponse []byte
+		)
+
+		BeforeAll(func(ctx context.Context) {
+			if testContext.kubeconfig == "" {
+				_, _ = fmt.Fprintln(GinkgoWriter, "kubeconfig parameter is empty. Defaulting to ~/.kube/config")
+			}
+
+			if len(testContext.chart) == 0 {
+				Fail("chart parameter is empty")
+			}
+
+			shouldResolvePath()
+			kubeConfigShouldExists()
+
+			k8sConfig := shouldCreateK8SConfig()
+			kubeClient = shouldCreateKubeClient(k8sConfig)
+			helmClient = shouldCreateHelmClient(k8sConfig)
+		})
+
+		AfterAll(func(ctx context.Context) {
+			_, _ = fmt.Fprintln(GinkgoWriter, "Starting cleanup for DCGM exporter with pod labels")
+
+			shouldUninstallHelmChart(helmClient, helmReleaseName)
+			shouldCleanupHelmClient(helmClient)
+			shouldDeleteNamespace(ctx, kubeClient)
+
+			_, _ = fmt.Fprintln(GinkgoWriter, "Cleanup completed")
+		})
+
+		It("should create namespace", func(ctx context.Context) {
+			shouldCreateNamespace(ctx, kubeClient, map[string]string{})
+		})
+
+		It("should install dcgm-exporter helm chart with pod labels enabled", func(ctx context.Context) {
+			helmReleaseName = shouldInstallHelmChart(ctx, helmClient, []string{
+				"serviceMonitor.enabled=false",
+				"extraEnvVars[0].name=DCGM_EXPORTER_ENABLE_POD_LABELS",
+				"extraEnvVars[0].value=true",
+			})
+		})
+
+		It("should create dcgm-exporter pod", func(ctx context.Context) {
+			dcgmExpPod = shouldCreateDCGMPod(ctx, kubeClient, testContext.namespace, labelMap)
+		})
+
+		It("should ensure that the dcgm-exporter pod is ready", func(ctx context.Context) {
+			shouldEnsurePodReadiness(ctx, kubeClient, dcgmExpPod)
+		})
+
+		It("should create a workload pod", func(ctx context.Context) {
+			shouldCreateWorkloadPod(ctx, kubeClient, customLabels)
+		})
+
+		It("should wait for 30 seconds, to read metrics", func() {
+			time.Sleep(30 * time.Second)
+		})
+
+		It("should read metrics", func(ctx context.Context) {
+			metricsResponse = shouldReadMetrics(ctx, kubeClient, dcgmExpPod, dcgmExporterPort)
+		})
+
+		It("should verify metrics have pod labels inside", func(ctx context.Context) {
+			Expect(metricsResponse).ShouldNot(BeEmpty())
+
+			_, _ = fmt.Fprintln(GinkgoWriter, "Read metrics: started")
+
+			// Parse and verify metrics contain custom pod labels
+			var parser expfmt.TextParser
+			metricFamilies, err := parser.TextToMetricFamilies(bytes.NewReader(metricsResponse))
+			Expect(err).ShouldNot(HaveOccurred(), "Error parsing metrics")
+			Expect(metricFamilies).ShouldNot(BeEmpty(), "No metrics found")
+
+			for _, metricFamily := range metricFamilies {
+				for _, metric := range metricFamily.GetMetric() {
+					for _, label := range metric.Label {
+						labelName := ptr.Deref(label.Name, "")
+						if slices.Contains(
+							[]string{"valid_key", "key_with_dashes", "key_with_dots"}, labelName,
+						) {
+							originalKey := strings.ReplaceAll(strings.ReplaceAll(labelName, "_", "."), "_", "-")
+							Expect(ptr.Deref(label.Value, "")).Should(
+								Equal(customLabels[originalKey]),
+								"Expected metric to include sanitized label %q with value %q, but got %q",
+								labelName, customLabels[originalKey], ptr.Deref(label.Value, ""),
+							)
+						}
+					}
+				}
+			}
+
+			_, _ = fmt.Fprintln(GinkgoWriter, "Pod labels verified successfully in metrics")
 		})
 	})
 })
