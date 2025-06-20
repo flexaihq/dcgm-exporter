@@ -384,6 +384,8 @@ func (p *PodMapper) createPodInfo(pod *podresourcesapi.PodResources, container *
 	}
 }
 
+// getPodLabels fetches labels from a Kubernetes pod via the API server.
+// It sanitizes label names to ensure they are valid for Prometheus metrics.
 func (p *PodMapper) getPodLabels(namespace, podName string) (map[string]string, error) {
 	if p.Client == nil {
 		return nil, fmt.Errorf("kubernetes client is not initialized")
