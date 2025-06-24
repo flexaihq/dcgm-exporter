@@ -20,16 +20,16 @@ metadata:
   namespace: {{ include "dcgm-exporter.namespace" . }}
   labels:
     {{- include "dcgm-exporter.labels" . | nindent 4 }}
-    app.kubernetes.io/component: "dcgm-exporter"
   {{- with .Values.service.annotations }}
   annotations:
   {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   type: {{ .Values.service.type }}
-  {{- if eq .Values.service.type "ClusterIP" }}
+  {{- if .Values.service.clusterIP }}
   clusterIP: {{ .Values.service.clusterIP | quote }}
   {{- end }}
+  internalTrafficPolicy: {{ .Values.service.internalTrafficPolicy }}
   ports:
   - name: "metrics"
     port: {{ .Values.service.port }}
